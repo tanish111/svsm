@@ -31,7 +31,21 @@ use kbs_types::Tee;
 use libaproxy::*;
 use serde::Serialize;
 use sha2::{Digest, Sha512};
+use zeroize::{Zeroize, Zeroizing};
 use zerocopy::{FromBytes, IntoBytes};
+
+type SecretBox = Zeroizing<Box<[u8]>>;
+
+fn secret_box_from_slice(slice: &[u8]) -> Result<SecretBox, AttestationError> {
+    let mut buffer = vec_sized(slice.len()).or(Err(AttestationError::VecAlloc))?;
+    buffer.copy_from_slice(slice);
+    Ok(Zeroizing::new(buffer.into_boxed_slice()))
+}
+
+fn secret_box_sized(size: usize) -> Result<SecretBox, AttestationError> {
+    let buffer = vec_sized(size).or(Err(AttestationError::VecAlloc))?;
+    Ok(Zeroizing::new(buffer.into_boxed_slice()))
+}
 
 /// The attestation driver that communicates with the proxy via some communication channel (serial
 /// port, virtio-vsock, etc...).
@@ -65,7 +79,7 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
 
 impl AttestationDriver<'_> {
     /// Attest SVSM's launch state by communicating with the attestation proxy.
-    pub fn attest(&mut self) -> Result<Vec<u8>, SvsmError> {
+    pub fn attest(&mut self) -> Result<SecretBox, SvsmError> {
         let negotiation = self.negotiation()?;
 
         Ok(self.attestation(negotiation)?)
@@ -89,7 +103,7 @@ impl AttestationDriver<'_> {
     /// Send an attestation request to the proxy. Proxy should reply with attestation response
     /// containing the status (success/fail) and an optional secret returned from the server upon
     /// successful attestation.
-    fn attestation(&mut self, n: NegotiationResponse) -> Result<Vec<u8>, AttestationError> {
+    fn attestation(&mut self, n: NegotiationResponse) -> Result<SecretBox, AttestationError> {
         let curve =
             Curve::new(self.ecc.pub_key().get_curve_id()).map_err(AttestationError::Crypto)?;
 
@@ -109,10 +123,11 @@ impl AttestationDriver<'_> {
         };
 
         self.write(req)?;
-        let payload = self.read()?;
+        let mut payload = self.read()?;
 
         let response: AttestationResponse = serde_json::from_slice(&payload)
             .map_err(|_| AttestationError::AttestationDeserialize)?;
+        payload.zeroize();
 
         if !response.success {
             return Err(AttestationError::Failed);
@@ -122,11 +137,13 @@ impl AttestationDriver<'_> {
             return Err(AttestationError::PublicKeyMissing)?;
         };
 
-        let Some(mut secret) = response.secret else {
+        let Some(mut secret_vec) = response.secret else {
             return Err(AttestationError::SecretMissing);
         };
 
-        self.decrypt(&mut secret, decryption)?;
+        let mut secret = secret_box_from_slice(&secret_vec)?;
+        secret_vec.zeroize();
+        self.decrypt(secret.as_mut(), decryption)?;
 
         Ok(secret)
     }
@@ -135,7 +152,7 @@ impl AttestationDriver<'_> {
     /// encrypted with ECDH-ES+A256KW as described in RFC 7518, section 4.6.2.
     fn decrypt(&self, secret: &mut [u8], decryption: AesGcmData) -> Result<(), AttestationError> {
         let epk: TpmsEccPoint<'static> = decryption.epk.into();
-        let z = ecdh_c_1_1_cdh_compute_z(&self.ecc, &epk).map_err(AttestationError::Crypto)?;
+        let mut z = ecdh_c_1_1_cdh_compute_z(&self.ecc, &epk).map_err(AttestationError::Crypto)?;
 
         let mut kdm = Vec::new();
         let alg_str = "ECDH-ES+A256KW".to_string();
@@ -147,26 +164,24 @@ impl AttestationDriver<'_> {
         kdm.extend_from_slice(&(256_u32).to_be_bytes());
 
         let wrapping_key: KekAes256 = {
-            let mut buf: Vec<u8> = vec_sized(32).or(Err(AttestationError::VecAlloc))?;
+            let mut kek_material = Zeroizing::new([0u8; 32]);
 
-            concat_kdf::derive_key_into::<sha2::Sha256>(&z, &kdm, &mut buf)
+            concat_kdf::derive_key_into::<sha2::Sha256>(&z, &kdm, kek_material.as_mut())
                 .map_err(AttestationError::KeyDerivation)?;
 
-            let sized: [u8; 32] = buf
-                .try_into()
-                .or(Err(AttestationError::WrapKeyArrayConvert))?;
-
-            Kek::new(&GenericArray::from(sized))
+            Kek::new(GenericArray::from(*kek_material))
         };
 
-        let mut cek =
-            vec_sized(&decryption.wrapped_cek.len() - 8).or(Err(AttestationError::VecAlloc))?;
+        z.zeroize();
+        kdm.zeroize();
+
+        let mut cek = secret_box_sized(decryption.wrapped_cek.len() - 8)?;
 
         wrapping_key
-            .unwrap(&decryption.wrapped_cek, &mut cek)
+            .unwrap(&decryption.wrapped_cek, cek.as_mut())
             .or(Err(AttestationError::CekUnwrap))?;
 
-        let cipher = Aes256Gcm::new(GenericArray::from_slice(&cek));
+        let cipher = Aes256Gcm::new(GenericArray::from_slice(cek.as_ref()));
 
         cipher
             .decrypt_in_place_detached(
