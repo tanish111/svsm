@@ -12,6 +12,7 @@ use crate::{
     greq::{pld_report::*, services::get_regular_report},
     io::{DEFAULT_IO_DRIVER, Read, Write},
     serial::SerialPort,
+    utils::util::{SecretBox, SecretBoxError},
     utils::vec::{try_to_vec, vec_sized},
 };
 #[cfg(feature = "vsock")]
@@ -128,7 +129,7 @@ impl TryFrom<Tee> for AttestationDriver<'_> {
 
 impl AttestationDriver<'_> {
     /// Attest SVSM's launch state by communicating with the attestation proxy.
-    pub fn attest(&mut self) -> Result<Vec<u8>, SvsmError> {
+    pub fn attest(&mut self) -> Result<SecretBox<512>, SvsmError> {
         let negotiation = self.negotiation()?;
 
         Ok(self.attestation(negotiation)?)
@@ -152,7 +153,7 @@ impl AttestationDriver<'_> {
     /// Send an attestation request to the proxy. Proxy should reply with attestation response
     /// containing the status (success/fail) and an optional secret returned from the server upon
     /// successful attestation.
-    fn attestation(&mut self, n: NegotiationResponse) -> Result<Vec<u8>, AttestationError> {
+    fn attestation(&mut self, n: NegotiationResponse) -> Result<SecretBox<512>, AttestationError> {
         let curve =
             Curve::new(self.ecc.pub_key().get_curve_id()).map_err(AttestationError::Crypto)?;
 
@@ -185,13 +186,15 @@ impl AttestationDriver<'_> {
             return Err(AttestationError::PublicKeyMissing)?;
         };
 
-        let Some(mut secret) = response.secret else {
+        let Some(secret) = response.secret else {
             return Err(AttestationError::SecretMissing);
         };
 
-        self.decrypt(&mut secret, decryption)?;
+        let mut secret_box = SecretBox::<512>::new(secret)?;
 
-        Ok(secret)
+        self.decrypt(secret_box.as_mut_slice(), decryption)?;
+
+        Ok(secret_box)
     }
 
     /// Decrypt a secret from the attestation server with the TEE private key. Secrets are
@@ -317,11 +320,19 @@ pub enum AttestationError {
     VecAlloc,
     // Unable to convert wrap key to 32 byte array.
     WrapKeyArrayConvert,
+    // Error reported when the size of the secret exceeds the capacity of the SecretBox.
+    SecretSizeMismatch,
 }
 
 impl From<AttestationError> for SvsmError {
     fn from(e: AttestationError) -> Self {
         Self::TeeAttestation(e)
+    }
+}
+
+impl From<SecretBoxError> for AttestationError {
+    fn from(_: SecretBoxError) -> Self {
+        AttestationError::SecretSizeMismatch
     }
 }
 

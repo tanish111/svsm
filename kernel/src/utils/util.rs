@@ -4,11 +4,14 @@
 //
 // Author: Joerg Roedel <jroedel@suse.de>
 
+extern crate alloc;
+
 use crate::address::{Address, VirtAddr};
 use crate::types::PAGE_SIZE;
+use alloc::vec::Vec;
 use core::ops::{Add, BitAnd, Not, Sub};
-
 use verus_stub::*;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[cfg(verus_keep_ghost)]
 include!("util.verus.rs");
@@ -110,10 +113,55 @@ macro_rules! BIT_MASK {
     }};
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum SecretBoxError {
+    /// Secret is larger than the box capacity N.
+    TooLarge { got: usize, cap: usize },
+}
+
+/// Secret Box which zeros our memory on drop. Useful for storing sensitive data like cryptographic keys.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct SecretBox<const N: usize> {
+    data: [u8; N],
+    len: usize,
+}
+
+impl<const N: usize> SecretBox<N> {
+    pub fn new(mut secret: Vec<u8>) -> Result<Self, SecretBoxError> {
+        let len = secret.len();
+        if len > N {
+            secret.zeroize();
+            return Err(SecretBoxError::TooLarge { got: len, cap: N });
+        }
+        let mut data = [0u8; N];
+        data[..len].copy_from_slice(&secret);
+        secret.zeroize();
+        Ok(Self { data, len })
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.data[..self.len]
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.data[..self.len]
+    }
+}
+
+impl<const N: usize> core::fmt::Debug for SecretBox<N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SecretBox")
+            .field("len", &self.len)
+            .field("data", &"[REDACTED]")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use crate::utils::util::*;
+    use alloc::vec::Vec;
+    use zeroize::Zeroize;
 
     #[test]
     fn test_mem_utils() {
@@ -154,5 +202,69 @@ mod tests {
         for byte in &data {
             assert_eq!(*byte, 0);
         }
+    }
+
+    #[test]
+    fn secretbox_stores_secret_and_zero_pads() {
+        let b = SecretBox::<8>::new(Vec::from([1u8, 2, 3, 4, 5])).unwrap();
+        assert_eq!(b.as_slice(), &[1, 2, 3, 4, 5]);
+        assert_eq!(b.len, 5);
+        assert_eq!(b.data[5..], [0u8; 3]); // bytes past len are zero
+    }
+
+    #[test]
+    fn secretbox_exact_capacity_ok() {
+        let b = SecretBox::<4>::new(Vec::from([9u8; 4])).unwrap();
+        assert_eq!(b.as_slice(), &[9, 9, 9, 9]);
+        assert_eq!(b.len, 4);
+    }
+
+    #[test]
+    fn secretbox_empty_ok() {
+        let b = SecretBox::<8>::new(Vec::new()).unwrap();
+        assert!(b.as_slice().is_empty());
+        assert_eq!(b.len, 0);
+    }
+
+    #[test]
+    fn secretbox_too_large_errors() {
+        match SecretBox::<8>::new(Vec::from([0u8; 9])) {
+            Err(SecretBoxError::TooLarge { got, cap }) => {
+                assert_eq!(got, 9);
+                assert_eq!(cap, 8);
+            }
+            _ => panic!("expected TooLarge"),
+        }
+    }
+
+    #[test]
+    fn secretbox_as_mut_slice_mutates() {
+        let mut b = SecretBox::<8>::new(Vec::from([1u8, 2, 3, 4])).unwrap();
+        b.as_mut_slice()[0] = 42;
+        assert_eq!(b.as_slice(), &[42, 2, 3, 4]);
+    }
+
+    #[test]
+    fn secretbox_zeroize_wipes_fields() {
+        let mut b = SecretBox::<8>::new(Vec::from([1u8, 2, 3, 4, 5, 6, 7, 8])).unwrap();
+        b.zeroize();
+        assert_eq!(b.data, [0u8; 8]);
+        assert_eq!(b.len, 0);
+    }
+
+    #[test]
+    fn secretbox_drop_zeroizes() {
+        use core::mem::ManuallyDrop;
+
+        let mut b =
+            ManuallyDrop::new(SecretBox::<8>::new(Vec::from([1u8, 2, 3, 4, 5, 6, 7, 8])).unwrap());
+        // SAFETY: `b` is a valid, initialized SecretBox dropped exactly once;
+        // ManuallyDrop keeps its memory alive afterward so reading the
+        // plain-integer bytes the destructor left behind is sound.
+        unsafe {
+            core::ptr::drop_in_place(&raw mut *b);
+        }
+        assert_eq!(b.data, [0u8; 8]);
+        assert_eq!(b.len, 0);
     }
 }
