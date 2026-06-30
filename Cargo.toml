@@ -103,6 +103,9 @@ virtio-drivers = { git = "https://github.com/rcore-os/virtio-drivers.git", rev =
 zerocopy = { version = "0.8.2", features = ["derive"] }
 zeroize = { version = "1.8.2", default-features = false }
 
+#Github repos
+cpufeature = { git = "https://github.com/tanish111/cpufeature.git", rev = "4f86e2d062ab8e456566d00db64913caa2f53f33" }
+
 # Verus repos
 verus_builtin = { version = "=0.0.0-2026-04-12-0118", default-features = false }
 verus_builtin_macros = { version = "=0.0.0-2026-04-12-0118", features = ["vpanic"], default-features = false }

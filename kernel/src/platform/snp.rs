@@ -58,6 +58,8 @@ use core::arch::x86_64::CpuidResult;
 use core::mem::MaybeUninit;
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
+use cpufeature::CpuidFeature;
+use cpufeature::backend::CpuidBackend;
 use syscall::GlobalFeatureFlags;
 
 static GHCB_IO_DRIVER: GHCBIOPort = GHCBIOPort::new();
@@ -477,6 +479,22 @@ impl SvsmPlatform for SnpPlatform {
         // outright prior to shutdown.
         raw_irqs_disable();
         request_termination_msr();
+    }
+}
+
+impl CpuidBackend for SnpPlatform {
+    fn cpuid(feature: &CpuidFeature) -> Option<CpuidResult>
+    where
+        Self: Sized,
+    {
+        // If this is an architectural CPUID leaf, then extract the result
+        // from the CPUID table.  Otherwise, request the value from the
+        // hypervisor.
+        if (feature.leaf >> 28) == 4 {
+            current_ghcb().cpuid(feature.leaf, feature.subleaf).ok()
+        } else {
+            cpuid_table(feature.leaf, feature.subleaf)
+        }
     }
 }
 

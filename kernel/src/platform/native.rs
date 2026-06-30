@@ -38,6 +38,7 @@ use cpuarch::x86apic::IcrMessageType;
 use bootdefs::kernel_launch::BLDR_BASE;
 use core::arch::asm;
 use core::mem::MaybeUninit;
+use cpufeature::backend::CpuidBackend;
 use syscall::GlobalFeatureFlags;
 
 #[cfg(debug_assertions)]
@@ -58,6 +59,8 @@ impl NativePlatform {
         Self {}
     }
 }
+
+impl CpuidBackend for NativePlatform {}
 
 impl SvsmPlatform for NativePlatform {
     #[cfg(test)]
