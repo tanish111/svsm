@@ -6,7 +6,6 @@
 
 extern crate alloc;
 
-use super::features::{Feature, cpu_has_feat};
 use super::gdt::GDT;
 use super::ipi::IpiState;
 use super::isst::Isst;
@@ -871,7 +870,7 @@ impl PerCpu {
 
         // Allocate hypercall pages if running on Hyper-V, unless this is the
         // BSP (where they will be allocated later).
-        if self.shared.cpu_index() != 0 && cpu_has_feat(Feature::HyperV) {
+        if self.shared.cpu_index() != 0 && hyperv::is_hyperv_host() {
             self.allocate_hypercall_pages()?;
         }
 

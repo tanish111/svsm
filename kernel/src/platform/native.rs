@@ -15,7 +15,6 @@ use super::capabilities::Caps;
 use crate::address::{PhysAddr, VirtAddr};
 use crate::console::init_svsm_console;
 use crate::cpu::IrqGuard;
-use crate::cpu::features::{Feature, cpu_has_feat};
 use crate::cpu::irq_state::raw_irqs_disable;
 use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::PerCpu;
@@ -25,8 +24,7 @@ use crate::cpu::x86::{
     X2APIC_ACCESSOR, apic_enable, apic_initialize, apic_post_irq, apic_sw_enable,
 };
 use crate::error::SvsmError;
-use crate::hyperv;
-use crate::hyperv::hyperv_start_cpu;
+use crate::hyperv::{self, hyperv_start_cpu, is_hyperv_host};
 use crate::io::{DEFAULT_IO_DRIVER, IOPort};
 use crate::platform::{cpuid_feature, cpuid_value_or, has_cpuid_feature};
 #[cfg(debug_assertions)]
@@ -224,7 +222,7 @@ impl SvsmPlatform for NativePlatform {
         ap_start_context_ref: Option<&ApStartContextRef>,
     ) -> Result<(), SvsmError> {
         let context = cpu.get_initial_context(start_rip);
-        if cpu_has_feat(Feature::HyperV) {
+        if is_hyperv_host() {
             return hyperv_start_cpu(cpu, &context);
         }
 

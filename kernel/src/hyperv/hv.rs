@@ -5,7 +5,6 @@
 // Author: Jon Lange (jlange@microsoft.com)
 
 use crate::address::{PhysAddr, VirtAddr};
-use crate::cpu::features::{Feature, cpu_has_feat};
 use crate::cpu::mem::unsafe_copy_bytes;
 use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::{PerCpu, this_cpu};
@@ -20,8 +19,10 @@ use crate::mm::page_visibility::SharedBox;
 use crate::mm::pagetable::PTEntryFlags;
 use crate::mm::{SVSM_HYPERCALL_CODE_PAGE, virt_to_page_frame};
 use crate::platform::SVSM_PLATFORM;
+use crate::platform::cpuid_value;
 use crate::types::PAGE_SIZE;
 use crate::utils::immut_after_init::ImmutAfterInitCell;
+use cpufeature::{CpuidFeature, CpuidRegister};
 
 use core::arch::asm;
 use core::marker::PhantomData;
@@ -280,6 +281,22 @@ pub const HV_STATUS_SUCCESS: u16 = 0;
 pub const HV_STATUS_OPERATION_FAILED: u16 = 0x71;
 pub const HV_STATUS_TIMEOUT: u16 = 0x78;
 
+/// CPUID.4000_0001:EAX — Hyper-V interface signature ("Hv#1").
+const HYPERV_INTERFACE: CpuidFeature = CpuidFeature {
+    leaf: 0x4000_0001,
+    subleaf: 0,
+    register: CpuidRegister::Eax,
+    shift: 0,
+    width: 32,
+};
+
+const HYPERV_INTERFACE_SIGNATURE: u32 = 0x3123_7648;
+
+/// Returns `true` if the host hypervisor is Hyper-V.
+pub fn is_hyperv_host() -> bool {
+    cpuid_value(&HYPERV_INTERFACE) == Some(HYPERV_INTERFACE_SIGNATURE)
+}
+
 static HYPERV_HYPERCALL_CODE_PAGE: ImmutAfterInitCell<VirtAddr> = ImmutAfterInitCell::uninit();
 static CURRENT_VTL: ImmutAfterInitCell<u8> = ImmutAfterInitCell::uninit();
 
@@ -333,7 +350,7 @@ fn hyperv_setup_hypercalls() -> Result<(), SvsmError> {
 
 pub fn hyperv_setup() -> Result<(), SvsmError> {
     // First, determine if this is a Hyper-V system.
-    if cpu_has_feat(Feature::HyperV) {
+    if is_hyperv_host() {
         // If this is the BSP, then configure hypercall pages.
         this_cpu().allocate_hypercall_pages()?;
 

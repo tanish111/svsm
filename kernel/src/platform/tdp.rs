@@ -12,15 +12,13 @@ use super::SvsmPlatform;
 use super::capabilities::Caps;
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::console::init_svsm_console;
-use crate::cpu::features::{Feature, cpu_has_feat};
 use crate::cpu::irq_state::raw_irqs_disable;
 use crate::cpu::percpu::PerCpu;
 use crate::cpu::smp::ApStartContextRef;
 use crate::cpu::smp::set_ap_start_context;
 use crate::cpu::x86::{apic_in_service, apic_initialize, apic_sw_enable};
 use crate::error::SvsmError;
-use crate::hyperv;
-use crate::hyperv::hyperv_start_cpu;
+use crate::hyperv::{self, hyperv_start_cpu, is_hyperv_host};
 use crate::io::IOPort;
 use crate::mm::PerCPUMapping;
 use crate::platform::IrqGuard;
@@ -266,7 +264,7 @@ impl SvsmPlatform for TdpPlatform {
 
         // When running under Hyper-V, the target vCPU does not begin running
         // until a start hypercall is issued, so make that hypercall now.
-        if cpu_has_feat(Feature::HyperV) {
+        if is_hyperv_host() {
             // Do not expose the actual CPU context via the hypercall since it
             // is not needed.  Use a default context instead.
             let ctx = hyperv::HvInitialVpContext::default();
