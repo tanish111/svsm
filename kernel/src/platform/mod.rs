@@ -22,6 +22,8 @@ use core::arch::asm;
 use core::arch::x86_64::{__cpuid_count, CpuidResult};
 use core::fmt::Debug;
 use core::mem::MaybeUninit;
+use cpufeature::CpuidFeature;
+use cpufeature::backend::CpuidBackend;
 
 use crate::address::{PhysAddr, VirtAddr};
 use crate::boot_params::BootParams;
@@ -369,7 +371,37 @@ macro_rules! platform_method {
 
 #[inline]
 pub fn cpuid(leaf: u32, subleaf: u32) -> Option<CpuidResult> {
-    platform_method!(cpuid, leaf, subleaf)
+    match *SVSM_PLATFORM_TYPE {
+        SvsmPlatformType::Native => <NativePlatform as SvsmPlatform>::cpuid(leaf, subleaf),
+        SvsmPlatformType::Snp => <SnpPlatform as SvsmPlatform>::cpuid(leaf, subleaf),
+        SvsmPlatformType::Tdp => <TdpPlatform as SvsmPlatform>::cpuid(leaf, subleaf),
+    }
+}
+
+#[inline]
+pub fn cpuid_feature(feature: &CpuidFeature) -> Option<CpuidResult> {
+    match *SVSM_PLATFORM_TYPE {
+        SvsmPlatformType::Native => <NativePlatform as CpuidBackend>::cpuid(feature),
+        SvsmPlatformType::Snp => <SnpPlatform as CpuidBackend>::cpuid(feature),
+        SvsmPlatformType::Tdp => <TdpPlatform as CpuidBackend>::cpuid(feature),
+    }
+}
+
+#[inline]
+pub fn cpuid_value(feature: &CpuidFeature) -> Option<u32> {
+    platform_method!(cpuid_value, feature)
+}
+
+/// Returns `true` if the given CPUID feature bit is set.
+#[inline]
+pub fn has_cpuid_feature(feature: &CpuidFeature) -> bool {
+    cpuid_value(feature) == Some(1)
+}
+
+/// Returns the raw CPUID field value, or `default` if unavailable.
+#[inline]
+pub fn cpuid_value_or(feature: &CpuidFeature, default: u32) -> u32 {
+    cpuid_value(feature).unwrap_or(default)
 }
 
 pub fn halt() {
