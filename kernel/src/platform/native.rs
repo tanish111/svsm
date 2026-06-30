@@ -26,7 +26,7 @@ use crate::cpu::x86::{
 use crate::error::SvsmError;
 use crate::hyperv::{self, hyperv_start_cpu, is_hyperv_host};
 use crate::io::{DEFAULT_IO_DRIVER, IOPort};
-use crate::platform::{cpuid_feature, cpuid_value_or, has_cpuid_feature};
+use crate::platform::{cpuid, cpuid_value_or, has_cpuid_feature};
 #[cfg(debug_assertions)]
 use crate::types::PageSize;
 use crate::utils::MemoryRegion;
@@ -89,7 +89,7 @@ impl SvsmPlatform for NativePlatform {
     }
 
     fn get_cpu_vendor(&self) -> CpuVendor {
-        match cpuid_feature(&MAX_STD_LEAF).map(|r| r.edx) {
+        match cpuid(&MAX_STD_LEAF).map(|r| r.edx) {
             Some(0x6974_6e65) => CpuVendor::AMD,
             Some(0x4965_6e69) => CpuVendor::Intel,
             _ => CpuVendor::Unknown,

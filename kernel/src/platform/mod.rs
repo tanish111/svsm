@@ -19,7 +19,7 @@ use snp::SnpPlatform;
 use tdp::TdpPlatform;
 
 use core::arch::asm;
-use core::arch::x86_64::{__cpuid_count, CpuidResult};
+use core::arch::x86_64::CpuidResult;
 use core::fmt::Debug;
 use core::mem::MaybeUninit;
 use cpufeature::CpuidFeature;
@@ -182,15 +182,6 @@ pub trait SvsmPlatform: Sync {
         input_control: hyperv::HvHypercallInput,
         hypercall_pages: &hyperv::HypercallPagesGuard<'_>,
     ) -> hyperv::HvHypercallOutput;
-
-    /// Obtain CPUID using platform-specific tables.
-    fn cpuid(eax: u32, ecx: u32) -> Option<CpuidResult>
-    where
-        Self: Sized,
-    {
-        // SAFETY: CPUID is always safe
-        unsafe { Some(__cpuid_count(eax, ecx)) }
-    }
 
     /// Write a host-owned MSR.
     /// # Safety
@@ -370,21 +361,8 @@ macro_rules! platform_method {
 }
 
 #[inline]
-pub fn cpuid(leaf: u32, subleaf: u32) -> Option<CpuidResult> {
-    match *SVSM_PLATFORM_TYPE {
-        SvsmPlatformType::Native => <NativePlatform as SvsmPlatform>::cpuid(leaf, subleaf),
-        SvsmPlatformType::Snp => <SnpPlatform as SvsmPlatform>::cpuid(leaf, subleaf),
-        SvsmPlatformType::Tdp => <TdpPlatform as SvsmPlatform>::cpuid(leaf, subleaf),
-    }
-}
-
-#[inline]
-pub fn cpuid_feature(feature: &CpuidFeature) -> Option<CpuidResult> {
-    match *SVSM_PLATFORM_TYPE {
-        SvsmPlatformType::Native => <NativePlatform as CpuidBackend>::cpuid(feature),
-        SvsmPlatformType::Snp => <SnpPlatform as CpuidBackend>::cpuid(feature),
-        SvsmPlatformType::Tdp => <TdpPlatform as CpuidBackend>::cpuid(feature),
-    }
+pub fn cpuid(feature: &CpuidFeature) -> Option<CpuidResult> {
+    platform_method!(cpuid, feature)
 }
 
 #[inline]

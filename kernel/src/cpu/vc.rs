@@ -214,7 +214,7 @@ mod tests {
     use super::*;
     use crate::cpu::msr::{RdtscpOut, rdtsc, rdtscp, read_msr, write_msr};
     use crate::locking::SpinLock;
-    use crate::platform::cpuid_feature;
+    use crate::platform::cpuid;
     use crate::platform::cpuid_value_or;
     use crate::sev::ghcb::GHCB;
     use crate::sev::utils::raw_vmmcall;
@@ -237,7 +237,7 @@ mod tests {
     #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
     fn test_has_amd_cpuid() {
         if is_test_platform_type(SvsmPlatformType::Snp) {
-            let (ebx, edx, ecx) = cpuid_feature(&MAX_STD_LEAF)
+            let (ebx, edx, ecx) = cpuid(&MAX_STD_LEAF)
                 .map(|r| (r.ebx, r.edx, r.ecx))
                 .unwrap_or((0, 0, 0));
             let vendor_name_bytes = [ebx, edx, ecx].map(|v| v.to_le_bytes()).concat();
