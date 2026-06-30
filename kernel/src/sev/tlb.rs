@@ -8,10 +8,11 @@ use bitfield_struct::bitfield;
 
 use crate::address::{Address, VirtAddr};
 use crate::cpu::TlbFlushRange;
-use crate::cpu::features::{Feature, cpu_get_feat};
 use crate::cpu::tlb::TlbFlushScope;
+use crate::platform::cpuid_value_or;
 use crate::types::PageSize;
 use crate::utils::MemoryRegion;
+use cpufeature::leaves::INVLPGB_MAX_PAGES;
 
 use core::arch::asm;
 
@@ -71,7 +72,7 @@ fn flush_tlb_sync(global: bool) {
 
 fn flush_tlb_sync_range(global: bool, region: MemoryRegion<VirtAddr>, pgsize: PageSize) {
     // A value of 0 indicates a single page, so add 1
-    let max_count = cpu_get_feat(Feature::InvlpgbMax) as usize + 1;
+    let max_count = cpuid_value_or(&INVLPGB_MAX_PAGES, 0) as usize + 1;
 
     for start in region.iter_pages(pgsize).step_by(max_count) {
         // Take up to `max_count` pages

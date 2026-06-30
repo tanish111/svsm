@@ -22,7 +22,6 @@ use crate::address::{Address, VirtAddr};
 use crate::cpu::IrqGuard;
 use crate::cpu::ShadowStackInit;
 use crate::cpu::X86ExceptionContext;
-use crate::cpu::features::{Feature, cpu_has_feat};
 use crate::cpu::idt::svsm::return_new_task;
 use crate::cpu::irq_state::EFLAGS_IF;
 use crate::cpu::irqs_enable;
@@ -45,9 +44,11 @@ use crate::mm::{
     mappings::create_anon_mapping, mappings::create_file_mapping,
 };
 use crate::platform::SVSM_PLATFORM;
+use crate::platform::has_cpuid_feature;
 use crate::syscall::{Obj, ObjError, ObjHandle};
 use crate::types::{SVSM_USER_CS, SVSM_USER_DS};
 use crate::utils::{MemoryRegion, is_aligned};
+use cpufeature::leaves::CET_SS;
 use intrusive_collections::{LinkedListAtomicLink, intrusive_adapter};
 
 use super::WaitQueue;
@@ -421,7 +422,7 @@ impl Task {
 
         let mut shadow_stack_offset = VirtAddr::null();
         let mut shadow_stack_base = VirtAddr::null();
-        let shadow_stack_mapping = if cpu_has_feat(Feature::CetSS) {
+        let shadow_stack_mapping = if has_cpuid_feature(&CET_SS) {
             // Allocate shadow stack and safe top_of_stack offset
             let shadow_stack = VMKernelStack::new_shadow()?;
             let offset = shadow_stack.top_of_stack();

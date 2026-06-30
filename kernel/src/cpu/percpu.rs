@@ -40,6 +40,7 @@ use crate::mm::{
     SVSM_SHADOW_STACK_ISST_DF_BASE, SVSM_SHADOW_STACKS_INIT_TASK, SVSM_STACK_IST_DF_BASE,
     virt_to_phys,
 };
+use crate::platform::has_cpuid_feature;
 use crate::platform::{SVSM_PLATFORM, SvsmPlatform};
 use crate::requests::SvsmCaa;
 use crate::sev::ghcb::{GHCB, GhcbPage};
@@ -75,6 +76,7 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 use cpuarch::vmsa::VMSA;
+use cpufeature::leaves::CET_SS;
 
 // PERCPU areas virtual addresses into shared memory
 pub static PERCPU_AREAS: PerCpuAreas = PerCpuAreas::new();
@@ -837,14 +839,14 @@ impl PerCpu {
         // Reserve ranges and initialize allocator for temporary mappings
         self.initialize_vm_ranges()?;
 
-        if cpu_has_feat(Feature::CetSS) {
+        if has_cpuid_feature(&CET_SS) {
             self.allocate_init_shadow_stack()?;
         }
 
         // Allocate per-cpu context switch stack
         self.allocate_context_switch_stack()?;
 
-        if cpu_has_feat(Feature::CetSS) {
+        if has_cpuid_feature(&CET_SS) {
             self.allocate_context_switch_shadow_stack()?;
         }
 
@@ -854,7 +856,7 @@ impl PerCpu {
         // Setup TSS
         self.setup_tss();
 
-        if cpu_has_feat(Feature::CetSS) {
+        if has_cpuid_feature(&CET_SS) {
             // Allocate ISST shadow stacks
             self.allocate_isst_shadow_stacks()?;
 

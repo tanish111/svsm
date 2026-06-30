@@ -14,6 +14,7 @@ use bootdefs::platform::SvsmPlatformType;
 use core::arch::global_asm;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
+use cpufeature::leaves::CET_SS;
 use svsm::address::{Address, PhysAddr, VirtAddr};
 #[cfg(feature = "attest")]
 use svsm::attest::AttestationDriver;
@@ -22,7 +23,6 @@ use svsm::boot_params::BootParams;
 use svsm::console::install_console_logger;
 use svsm::cpu::control_regs::{cr0_init, cr4_init};
 use svsm::cpu::cpuid::dump_cpuid_table;
-use svsm::cpu::features::{Feature, cpu_has_feat};
 use svsm::cpu::gdt::GLOBAL_GDT;
 use svsm::cpu::idt::svsm::{early_idt_init, idt_init};
 use svsm::cpu::idt::{EARLY_IDT_ENTRIES, IDT, IdtEntry};
@@ -59,6 +59,7 @@ use svsm::platform::PlatformPageType;
 use svsm::platform::SVSM_PLATFORM;
 use svsm::platform::SvsmPlatform;
 use svsm::platform::SvsmPlatformCell;
+use svsm::platform::has_cpuid_feature;
 use svsm::platform::init_capabilities;
 use svsm::platform::init_platform_type;
 #[cfg(all(feature = "uefivars", not(test)))]
@@ -440,7 +441,7 @@ unsafe extern "C" fn svsm_entry(li: *mut KernelLaunchInfo, platform_type: SvsmPl
 
     // Shadow stacks must be enabled once no further function returns are
     // possible.
-    if cpu_has_feat(Feature::CetSS) {
+    if has_cpuid_feature(&CET_SS) {
         set_cet_ss_enabled();
         let ssp_token_addr = ssp_token.unwrap();
         enable_shadow_stacks!(ssp_token_addr);

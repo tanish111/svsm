@@ -22,7 +22,6 @@ use crate::boot_params::BootParams;
 use crate::console::init_svsm_console;
 use crate::cpu::cpuid::cpuid_table;
 use crate::cpu::cpuid::init_cpuid_table;
-use crate::cpu::features::{Feature, cpu_get_feat};
 use crate::cpu::irq_state::raw_irqs_disable;
 use crate::cpu::percpu::{PerCpu, current_ghcb, this_cpu};
 use crate::cpu::smp::ApStartContextRef;
@@ -38,6 +37,7 @@ use crate::mm::PAGE_SIZE_2M;
 use crate::mm::PerCPUPageMappingGuard;
 use crate::mm::memory::write_guest_memory_map;
 use crate::platform::IrqGuard;
+use crate::platform::cpuid_value_or;
 use crate::sev::ghcb::GHCBIOSize;
 use crate::sev::hv_doorbell::HVDoorbell;
 use crate::sev::msr_protocol::{
@@ -60,6 +60,7 @@ use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 use cpufeature::CpuidFeature;
 use cpufeature::backend::CpuidBackend;
+use cpufeature::leaves::{PHYS_ADDR_BITS, PTE_CBIT_POS};
 use syscall::GlobalFeatureFlags;
 
 static GHCB_IO_DRIVER: GHCBIOPort = GHCBIOPort::new();
@@ -251,7 +252,7 @@ impl SvsmPlatform for SnpPlatform {
 
     fn get_page_encryption_masks(&self) -> PageEncryptionMasks {
         // Find physical address size.
-        let phys_addr_sizes = cpu_get_feat(Feature::PhysAddrSizes);
+        let phys_addr_sizes = cpuid_value_or(&PHYS_ADDR_BITS, 0);
         if vtom_enabled() {
             let vtom = *VTOM;
             PageEncryptionMasks {
@@ -262,7 +263,7 @@ impl SvsmPlatform for SnpPlatform {
             }
         } else {
             // Find C-bit position.
-            let c_bit = cpu_get_feat(Feature::Cbit);
+            let c_bit = cpuid_value_or(&PTE_CBIT_POS, 0);
             if c_bit == 0 {
                 panic!("Cannot get C-Bit position from CPUID");
             }

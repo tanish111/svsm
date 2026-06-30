@@ -5,13 +5,15 @@
 // Author: Vasant Karasulli <vkarasulli@suse.de>
 
 use crate::cpu::control_regs::{cr0_sse_enable, cr4_osfxsr_enable, cr4_xsave_enable};
-use crate::platform::cpuid;
+use crate::platform::{cpuid_feature, has_cpuid_feature};
 use core::arch::asm;
 use core::arch::x86_64::{_xgetbv, _xsetbv};
 use core::sync::atomic::{AtomicU64, Ordering};
-
-use super::features::{Feature, cpu_has_feat};
-
+use cpufeature::CpuidFeature;
+use cpufeature::leaves::{
+    X86_FEATURE_XMM, X86_FEATURE_XSAVE, X86_FEATURE_XSAVEOPT, XCR0_AVX, XCR0_SSE, XCR0_X87,
+    XSAVE_SZ,
+};
 const XCR0_X87_ENABLE: u64 = 0x1;
 const XCR0_SSE_ENABLE: u64 = 0x2;
 const XCR0_YMM_ENABLE: u64 = 0x4;
@@ -22,7 +24,7 @@ pub const XSAVE_LEGACY_SIZE: u32 = 0x240;
 static SVSM_XCR0: AtomicU64 = AtomicU64::new(XCR0_X87_ENABLE | XCR0_SSE_ENABLE);
 
 fn legacy_sse_enable() {
-    if cpu_has_feat(Feature::Sse1) {
+    if has_cpuid_feature(&X86_FEATURE_XMM) {
         cr4_osfxsr_enable();
         cr0_sse_enable();
     } else {
@@ -40,10 +42,10 @@ fn xcr0_set() {
 }
 
 fn xsave_enable() {
-    if cpu_has_feat(Feature::Xsave) && cpu_has_feat(Feature::XsaveOpt) {
-        if cpu_has_feat(Feature::Xcr0X87)
-            && cpu_has_feat(Feature::Xcr0Sse)
-            && cpu_has_feat(Feature::Xcr0Avx)
+    if has_cpuid_feature(&X86_FEATURE_XSAVE) && has_cpuid_feature(&X86_FEATURE_XSAVEOPT) {
+        if has_cpuid_feature(&XCR0_X87)
+            && has_cpuid_feature(&XCR0_SSE)
+            && has_cpuid_feature(&XCR0_AVX)
         {
             SVSM_XCR0.fetch_or(XCR0_YMM_ENABLE, Ordering::Relaxed);
         }
@@ -75,7 +77,11 @@ pub fn xsave_area_size() -> u32 {
         if xcr0 & (1u64 << bit) == 0 {
             continue;
         }
-        let Some(result) = cpuid(0xd, bit) else {
+        let feature = CpuidFeature {
+            subleaf: bit,
+            ..XSAVE_SZ
+        };
+        let Some(result) = cpuid_feature(&feature) else {
             log::warn!("FP feature {bit:#x} enabled but not present in CPUID");
             continue;
         };

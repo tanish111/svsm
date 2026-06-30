@@ -214,11 +214,13 @@ mod tests {
     use super::*;
     use crate::cpu::msr::{RdtscpOut, rdtsc, rdtscp, read_msr, write_msr};
     use crate::locking::SpinLock;
+    use crate::platform::cpuid_feature;
+    use crate::platform::cpuid_value_or;
     use crate::sev::ghcb::GHCB;
     use crate::sev::utils::raw_vmmcall;
     use bootdefs::platform::SvsmPlatformType;
     use core::arch::asm;
-    use core::arch::x86_64::__cpuid_count;
+    use cpufeature::leaves::{MAX_EXT_LEAF, MAX_STD_LEAF};
 
     #[test]
     #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
@@ -227,31 +229,18 @@ mod tests {
             return;
         }
 
-        const CPUID_EXTENDED_FUNCTION_INFO: u32 = 0x8000_0000;
         const CPUID_MEMORY_ENCRYPTION_INFO: u32 = 0x8000_001F;
-        // Stable clippy and the nightly rust compiler disagree on the safety
-        // of __cpuid_count(). Silence both until this is resolved.
-        #[allow(unused_unsafe)]
-        // SAFETY: CPUID does never affect safety.
-        let extended_info = unsafe { __cpuid_count(CPUID_EXTENDED_FUNCTION_INFO, 0) };
-        assert!(extended_info.eax >= CPUID_MEMORY_ENCRYPTION_INFO);
+        assert!(cpuid_value_or(&MAX_EXT_LEAF, 0) >= CPUID_MEMORY_ENCRYPTION_INFO);
     }
 
     #[test]
     #[cfg_attr(not(test_in_svsm), ignore = "Can only be run inside guest")]
     fn test_has_amd_cpuid() {
         if is_test_platform_type(SvsmPlatformType::Snp) {
-            const CPUID_VENDOR_INFO: u32 = 0;
-
-            // Stable clippy and the nightly rust compiler disagree on the safety
-            // of __cpuid_count(). Silence both until this is resolved.
-            #[allow(unused_unsafe)]
-            // SAFETY: CPUID does never affect safety.
-            let vendor_info = unsafe { __cpuid_count(CPUID_VENDOR_INFO, 0) };
-
-            let vendor_name_bytes = [vendor_info.ebx, vendor_info.edx, vendor_info.ecx]
-                .map(|v| v.to_le_bytes())
-                .concat();
+            let (ebx, edx, ecx) = cpuid_feature(&MAX_STD_LEAF)
+                .map(|r| (r.ebx, r.edx, r.ecx))
+                .unwrap_or((0, 0, 0));
+            let vendor_name_bytes = [ebx, edx, ecx].map(|v| v.to_le_bytes()).concat();
 
             assert_eq!(core::str::from_utf8(&vendor_name_bytes), Ok("AuthenticAMD"));
         }

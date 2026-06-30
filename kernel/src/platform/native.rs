@@ -12,11 +12,10 @@ use super::PageStateChangeOp;
 use super::PageValidateOp;
 use super::SvsmPlatform;
 use super::capabilities::Caps;
-use super::cpuid;
 use crate::address::{PhysAddr, VirtAddr};
 use crate::console::init_svsm_console;
 use crate::cpu::IrqGuard;
-use crate::cpu::features::{Feature, cpu_get_feat, cpu_has_feat};
+use crate::cpu::features::{Feature, cpu_has_feat};
 use crate::cpu::irq_state::raw_irqs_disable;
 use crate::cpu::msr::write_msr;
 use crate::cpu::percpu::PerCpu;
@@ -29,6 +28,7 @@ use crate::error::SvsmError;
 use crate::hyperv;
 use crate::hyperv::hyperv_start_cpu;
 use crate::io::{DEFAULT_IO_DRIVER, IOPort};
+use crate::platform::{cpuid_feature, cpuid_value_or, has_cpuid_feature};
 #[cfg(debug_assertions)]
 use crate::types::PageSize;
 use crate::utils::MemoryRegion;
@@ -39,6 +39,7 @@ use bootdefs::kernel_launch::BLDR_BASE;
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use cpufeature::backend::CpuidBackend;
+use cpufeature::leaves::{MAX_STD_LEAF, PHYS_ADDR_BITS, X86_FEATURE_X2APIC};
 use syscall::GlobalFeatureFlags;
 
 #[cfg(debug_assertions)]
@@ -53,7 +54,7 @@ pub struct NativePlatform {}
 impl NativePlatform {
     pub fn new(_suppress_svsm_interrupts: bool) -> Self {
         // Execution is not possible unless X2APIC is supported.
-        if !cpu_has_feat(Feature::X2Apic) {
+        if !has_cpuid_feature(&X86_FEATURE_X2APIC) {
             panic!("X2APIC is not supported");
         }
         Self {}
@@ -90,14 +91,10 @@ impl SvsmPlatform for NativePlatform {
     }
 
     fn get_cpu_vendor(&self) -> CpuVendor {
-        if let Some(r) = cpuid(0, 0) {
-            match r.edx {
-                0x69746e65 => CpuVendor::AMD,
-                0x49656e69 => CpuVendor::Intel,
-                _ => CpuVendor::Unknown,
-            }
-        } else {
-            CpuVendor::Unknown
+        match cpuid_feature(&MAX_STD_LEAF).map(|r| r.edx) {
+            Some(0x6974_6e65) => CpuVendor::AMD,
+            Some(0x4965_6e69) => CpuVendor::Intel,
+            _ => CpuVendor::Unknown,
         }
     }
 
@@ -114,7 +111,7 @@ impl SvsmPlatform for NativePlatform {
 
     fn get_page_encryption_masks(&self) -> PageEncryptionMasks {
         // Find physical address size.
-        let phys_addr_sizes = cpu_get_feat(Feature::PhysAddrSizes);
+        let phys_addr_sizes = cpuid_value_or(&PHYS_ADDR_BITS, 0);
         PageEncryptionMasks {
             private_pte_mask: 0,
             shared_pte_mask: 0,

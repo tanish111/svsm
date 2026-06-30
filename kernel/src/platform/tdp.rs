@@ -12,7 +12,7 @@ use super::SvsmPlatform;
 use super::capabilities::Caps;
 use crate::address::{Address, PhysAddr, VirtAddr};
 use crate::console::init_svsm_console;
-use crate::cpu::features::{Feature, cpu_get_feat, cpu_has_feat};
+use crate::cpu::features::{Feature, cpu_has_feat};
 use crate::cpu::irq_state::raw_irqs_disable;
 use crate::cpu::percpu::PerCpu;
 use crate::cpu::smp::ApStartContextRef;
@@ -24,6 +24,7 @@ use crate::hyperv::hyperv_start_cpu;
 use crate::io::IOPort;
 use crate::mm::PerCPUMapping;
 use crate::platform::IrqGuard;
+use crate::platform::cpuid_value_or;
 use crate::tdx::apic::TDX_APIC_ACCESSOR;
 use crate::tdx::tdcall::{
     MD_TDCS_NUM_L2_VMS, TdpHaltInterruptState, td_accept_physical_memory, td_accept_virtual_memory,
@@ -38,6 +39,7 @@ use bootdefs::tdp_start::TdpStartContext;
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 use cpufeature::backend::CpuidBackend;
+use cpufeature::leaves::PHYS_ADDR_BITS;
 use syscall::GlobalFeatureFlags;
 
 #[cfg(test)]
@@ -104,7 +106,7 @@ impl SvsmPlatform for TdpPlatform {
 
     fn get_page_encryption_masks(&self) -> PageEncryptionMasks {
         // Find physical address size.
-        let phys_addr_sizes = cpu_get_feat(Feature::PhysAddrSizes);
+        let phys_addr_sizes = cpuid_value_or(&PHYS_ADDR_BITS, 0);
         let vtom = *VTOM;
         PageEncryptionMasks {
             private_pte_mask: 0,
